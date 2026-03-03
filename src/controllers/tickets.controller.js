@@ -11,7 +11,7 @@ const createSchema = z.object({
   issueType: z.string().min(1),
 
   description: z.string().optional().default(""),
-  handledBy: z.string().optional().default("")
+  handledBy: z.string().optional().default(""),
 });
 
 export async function createTicket(req, res) {
@@ -30,59 +30,58 @@ function isEditPayload(body) {
   return keys.some((k) => k !== "status");
 }
 
-
-
-/**
- * Search logic:
- * - q (free text) matches orderId/mobile/schoolName/issueType/description
- * - OR use exact filters: orderId, mobile, issueType, schoolName, status
- * - pagination: page, limit
- */
 export async function listTickets(req, res) {
   try {
     const {
-      q,
-      orderId,
-      mobile,
-      issueType,
-      schoolName,
-      status,
+      q = "",
+      orderId = "",
+      mobile = "",
+      issueType = "",
+      schoolName = "",
+      status = "",
+      from = "",
+      to = "",
       page = "1",
-      limit = "20"
+      limit = "20",
     } = req.query;
 
-    const filters = {};
-    if (status) filters.status = status;
-    if (orderId) filters.orderId = String(orderId).trim();
-    if (mobile) filters.mobile = String(mobile).trim();
-    if (issueType) filters.issueType = String(issueType).trim();
-    if (schoolName) filters.schoolName = String(schoolName).trim();
+    const filter = {};
 
-    const andClauses = [filters];
+    // Exact match filters
+    if (status && String(status).trim()) filter.status = String(status).trim();
+    if (orderId && String(orderId).trim()) filter.orderId = String(orderId).trim();
+    if (mobile && String(mobile).trim()) filter.mobile = String(mobile).trim();
+    if (issueType && String(issueType).trim()) filter.issueType = String(issueType).trim();
 
-    if (q && String(q).trim()) {
-      const term = String(q).trim();
-      const regex = new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
-      andClauses.push({
-        $or: [
-          { orderId: regex },
-          { mobile: regex },
-          { schoolName: regex },
-          { issueType: regex },
-          { description: regex }
-        ]
-      });
+    // ✅ NEW: school filter
+    if (schoolName && String(schoolName).trim()) filter.schoolName = String(schoolName).trim();
+
+    // ✅ NEW: date range filter (createdAt)
+    if ((from && String(from).trim()) || (to && String(to).trim())) {
+      filter.createdAt = {};
+      if (from && String(from).trim()) filter.createdAt.$gte = new Date(`${from}T00:00:00.000Z`);
+      if (to && String(to).trim()) filter.createdAt.$lte = new Date(`${to}T23:59:59.999Z`);
     }
 
-    const finalQuery = andClauses.length > 1 ? { $and: andClauses } : filters;
+    // "q" search across fields (optional)
+    const qv = String(q).trim();
+    if (qv) {
+      filter.$or = [
+        { orderId: { $regex: qv, $options: "i" } },
+        { mobile: { $regex: qv, $options: "i" } },
+        { schoolName: { $regex: qv, $options: "i" } },
+        { issueType: { $regex: qv, $options: "i" } },
+        { description: { $regex: qv, $options: "i" } },
+      ];
+    }
 
     const pageNum = Math.max(parseInt(page, 10) || 1, 1);
-    const limitNum = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 100);
+    const limitNum = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 200);
     const skip = (pageNum - 1) * limitNum;
 
     const [items, total] = await Promise.all([
-      Ticket.find(finalQuery).sort({ createdAt: -1 }).skip(skip).limit(limitNum),
-      Ticket.countDocuments(finalQuery)
+      Ticket.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limitNum).lean(),
+      Ticket.countDocuments(filter),
     ]);
 
     res.json({
@@ -90,10 +89,11 @@ export async function listTickets(req, res) {
       total,
       page: pageNum,
       limit: limitNum,
-      pages: Math.ceil(total / limitNum)
+      pages: Math.ceil(total / limitNum),
     });
-  } catch (e) {
-    return res.status(500).json({ message: "Server error", error: String(e) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Failed to load tickets" });
   }
 }
 
@@ -121,7 +121,16 @@ export async function updateTicket(req, res) {
       }
     }
 
-    const allowed = ["orderId", "mobile", "schoolName", "issueType", "description", "status", "handledBy"];
+    const allowed = [
+      "orderId",
+      "mobile",
+      "schoolName",
+      "issueType",
+      "description",
+      "status",
+      "handledBy",
+    ];
+
     const patch = {};
     for (const key of allowed) {
       if (key in req.body) patch[key] = req.body[key];
