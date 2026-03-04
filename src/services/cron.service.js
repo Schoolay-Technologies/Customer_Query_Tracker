@@ -216,8 +216,8 @@ async function sendDailyDigest() {
 
     await transporter.sendMail({
       from: process.env.SMTP_FROM || process.env.SMTP_USER,
-      to: 'madhavan@schoolay.com',
-      cc: ['madhavansivakumar372@gmail.com', 'customersupport@schoolay.com'],
+      to: 'kiran@schoolay.com',
+      cc: ['madhavan@schoolay.com', 'gowripavithra29@gmail.com','risharisha169@gmail.com'],
       subject: `📊 Daily Schedule Digest - ${today.toLocaleDateString()}`,
       html: htmlContent,
     });
