@@ -5,9 +5,9 @@ import dotenv from "dotenv";
 import { connectDB } from "./config/db.js";
 import ticketRoutes from "./routes/tickets.routes.js";
 import reportRoutes from "./routes/reports.routes.js";
-import reportsRoutes from "./routes/reports.routes.js";
 import tasksRoutes from "./routes/tasks.routes.js";
 import schedulesRoutes from "./routes/schedules.routes.js";
+import { initCronJobs } from "./services/cron.service.js"; // Change this import
 
 dotenv.config();
 const app = express();
@@ -24,18 +24,29 @@ app.get("/", (req, res) => {
     status: "running",
   });
 });
+
 app.use("/api/tickets", ticketRoutes);
 app.use("/api/reports", reportRoutes);
-app.use("/api/reports", reportsRoutes);
 app.use("/api/tasks", tasksRoutes);
 app.use("/api/schedules", schedulesRoutes);
+
 const port = process.env.PORT || 5000;
 
-connectDB(process.env.MONGO_URI)
-  .then(() => {
-    app.listen(port, () => console.log(`API running on http://localhost:${port}`));
-  })
-  .catch((err) => {
-    console.error("DB connection failed:", err);
+// Wrap the initialization in an async function
+async function startServer() {
+  try {
+    await connectDB(process.env.MONGO_URI);
+    console.log("✅ Database connected");
+    
+    initCronJobs();
+
+    
+    app.listen(port, () => console.log(`🚀 API running on http://localhost:${port}`));
+  } catch (err) {
+    console.error("❌ Server startup failed:", err);
     process.exit(1);
-  });
+  }
+}
+
+// Call the async function
+startServer();

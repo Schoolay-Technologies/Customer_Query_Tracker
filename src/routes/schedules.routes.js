@@ -12,72 +12,125 @@ function requireSchedulePassword(req, res, next) {
 }
 
 router.get("/", async (req, res) => {
-  const items = await Schedule.find().lean();
-
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  const past = [];
-  const upcoming = [];
-
-  for (const it of items) {
-    const d = new Date(it.date);
-    d.setHours(0, 0, 0, 0);
-    if (d < today) past.push(it);
-    else upcoming.push(it);
+  try {
+    const items = await Schedule.find().lean();
+    res.json({ items });
+  } catch (error) {
+    console.error('Error fetching schedules:', error);
+    res.status(500).json({ message: "Failed to fetch schedules" });
   }
-
-  past.sort((a, b) => new Date(b.date) - new Date(a.date)); // recent past first
-  upcoming.sort((a, b) => new Date(a.date) - new Date(b.date)); // nearest upcoming first
-
-  res.json({ items: [...past, ...upcoming] });
 });
 
 router.post("/", upload.single("file"), async (req, res) => {
-  const body = req.body;
+  try {
+    const body = req.body;
+    
+    // Parse reminders if provided
+    let reminders = [];
+    if (body.reminders) {
+      try {
+        reminders = JSON.parse(body.reminders).map(r => ({
+          ...r,
+          date: new Date(r.date)
+        }));
+      } catch (e) {
+        console.error('Failed to parse reminders:', e);
+      }
+    }
 
-  const attachment = req.file
-    ? { filename: req.file.originalname, mimetype: req.file.mimetype, data: req.file.buffer }
-    : null;
+    const attachment = req.file
+      ? { filename: req.file.originalname, mimetype: req.file.mimetype, data: req.file.buffer }
+      : null;
 
-  const created = await Schedule.create({
-    type: body.type,
-    company: body.company || "",
-    product: body.product || "",
-    schoolName: body.schoolName || "",
-    eventPlanned: body.eventPlanned || "Others",
-    date: new Date(body.date),
-    description: body.description || "",
-    attachment,
-  });
+    const created = await Schedule.create({
+      type: body.type,
+      company: body.company || "",
+      product: body.product || "",
+      schoolName: body.schoolName || "",
+      eventPlanned: body.eventPlanned || "Others",
+      date: new Date(body.date),
+      time: body.time || "09:00",
+      description: body.description || "",
+      attachment,
+      reminders
+    });
 
-  res.status(201).json(created);
+    console.log(`✅ Schedule created: ${created._id} with ${reminders.length} reminders`);
+    res.status(201).json(created);
+  } catch (error) {
+    console.error('Failed to create schedule:', error);
+    res.status(500).json({ message: "Failed to create schedule" });
+  }
 });
 
 router.patch("/:id", requireSchedulePassword, upload.single("file"), async (req, res) => {
-  const update = { ...req.body };
-  if (update.date) update.date = new Date(update.date);
+  try {
+    const update = { ...req.body };
+    if (update.date) update.date = new Date(update.date);
+    if (update.reminders) {
+      try {
+        update.reminders = JSON.parse(update.reminders).map(r => ({
+          ...r,
+          date: new Date(r.date)
+        }));
+      } catch (e) {
+        console.error('Failed to parse reminders:', e);
+      }
+    }
 
-  if (req.file) {
-    update.attachment = { filename: req.file.originalname, mimetype: req.file.mimetype, data: req.file.buffer };
+    if (req.file) {
+      update.attachment = { filename: req.file.originalname, mimetype: req.file.mimetype, data: req.file.buffer };
+    }
+
+    const updated = await Schedule.findByIdAndUpdate(
+      req.params.id, 
+      update, 
+      { new: true, runValidators: true }
+    );
+
+    if (!updated) {
+      return res.status(404).json({ message: "Schedule not found" });
+    }
+
+    console.log(`✅ Schedule updated: ${updated._id}`);
+    res.json(updated);
+  } catch (error) {
+    console.error('Failed to update schedule:', error);
+    res.status(500).json({ message: "Failed to update schedule" });
   }
-
-  const updated = await Schedule.findByIdAndUpdate(req.params.id, update, { new: true });
-  res.json(updated);
 });
 
 router.delete("/:id", requireSchedulePassword, async (req, res) => {
-  await Schedule.findByIdAndDelete(req.params.id);
-  res.json({ ok: true });
+  try {
+    const deleted = await Schedule.findByIdAndDelete(req.params.id);
+    
+    if (!deleted) {
+      return res.status(404).json({ message: "Schedule not found" });
+    }
+
+    console.log(`✅ Schedule deleted: ${req.params.id}`);
+    res.json({ ok: true, message: "Schedule deleted successfully" });
+  } catch (error) {
+    console.error('Failed to delete schedule:', error);
+    res.status(500).json({ message: "Failed to delete schedule" });
+  }
 });
 
 router.get("/:id/file", async (req, res) => {
-  const item = await Schedule.findById(req.params.id).lean();
-  if (!item?.attachment?.data) return res.status(404).end();
+  try {
+    const item = await Schedule.findById(req.params.id).lean();
+    
+    if (!item?.attachment?.data) {
+      return res.status(404).json({ message: "File not found" });
+    }
 
-  res.setHeader("Content-Type", item.attachment.mimetype);
-  res.setHeader("Content-Disposition", `attachment; filename="${item.attachment.filename}"`);
-  res.send(item.attachment.data);
+    res.setHeader("Content-Type", item.attachment.mimetype);
+    res.setHeader("Content-Disposition", `attachment; filename="${item.attachment.filename}"`);
+    res.send(item.attachment.data);
+  } catch (error) {
+    console.error('Failed to fetch file:', error);
+    res.status(500).json({ message: "Failed to fetch file" });
+  }
 });
 
 export default router;
